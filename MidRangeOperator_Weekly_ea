@@ -1,0 +1,366 @@
+//+------------------------------------------------------------------+
+//|                                       MidRangeOperator_Weekly_ea |
+//|                                 Copyright 2025, MidRangeOperator |
+//|                                 https://www.MidRangeOperator.com |
+//+------------------------------------------------------------------+
+#include <ChartObjects\ChartObjectsShapes.mqh>
+
+ color RectColorDay = clrDarkSlateGray;      // Color for daily rectangles
+ color RectColorWeek = clrSlateBlue;         // Color for weekly rectangles
+ color MidLineColor = clrGold;               // Color for midline
+ color Above50Color = clrSpringGreen;        // Color for above 50% lines
+ color Below50Color = clrTomato;             // Color for below 50% lines
+ bool UseOutsideWeeklyBody = true;           // Only draw midlines outside weekly candle body
+input ENUM_TIMEFRAMES TimeFrameDay = PERIOD_D1;   // Daily timeframe
+input ENUM_TIMEFRAMES TimeFrameWeek = PERIOD_W1;  // Weekly timeframe
+
+datetime lastDayTime = 0;
+datetime lastWeekTime = 0;
+datetime lastH1Time = 0;
+string UniquePrefix = "MyIndicator_";
+
+//+------------------------------------------------------------------+
+//| Initialization function                                           |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrDarkGreen);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrDarkGreen);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP, clrDarkGreen);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrDarkGreen);
+   ChartSetInteger(0, CHART_SHOW_GRID, false);
+   EventSetTimer(60);
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Deinitialization function                                        |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+
+   EventKillTimer();
+   //ObjectsDeleteAll(0, "Rect_");
+   //ObjectsDeleteAll(0, "MidLine_");
+   //ObjectsDeleteAll(0, UniquePrefix + "CloseLine_");
+}
+
+//+------------------------------------------------------------------+
+//| Timer function                                                   |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   DrawDailyRectangle();
+   DrawWeeklyRectangle();
+   DrawFirstH1CloseLine();
+}
+
+//+------------------------------------------------------------------+
+//| Draw daily rectangle                                             |
+//+------------------------------------------------------------------+
+void DrawDailyRectangle()
+{
+   int dayBars = Bars(_Symbol, TimeFrameDay);
+   if(dayBars < 2)
+      return;
+
+   datetime timePrev = iTime(_Symbol, TimeFrameDay, 1);
+   if(timePrev == lastDayTime)
+      return;
+
+   double high = iHigh(_Symbol, TimeFrameDay, 1);
+   double low = iLow(_Symbol, TimeFrameDay, 1);
+   datetime start = iTime(_Symbol, TimeFrameDay, 1);
+   datetime end = iTime(_Symbol, TimeFrameDay, 0);
+
+   string name = "Rect_Day_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
+   DrawRect(name, start, end, high, low, RectColorDay);
+
+   lastDayTime = timePrev;
+}
+
+//+------------------------------------------------------------------+
+//| Draw weekly rectangle and check midlines                         |
+//+------------------------------------------------------------------+
+void DrawWeeklyRectangle()
+{
+   int weekBars = Bars(_Symbol, TimeFrameWeek);
+   if(weekBars < 2)
+      return;
+
+   datetime timePrev = iTime(_Symbol, TimeFrameWeek, 1);
+   if(timePrev == lastWeekTime)
+      return;
+
+   double open = iOpen(_Symbol, TimeFrameWeek, 1);
+   double close = iClose(_Symbol, TimeFrameWeek, 1);
+   double top = MathMax(open, close);
+   double bottom = MathMin(open, close);
+   datetime start = iTime(_Symbol, TimeFrameWeek, 1);
+   datetime end = iTime(_Symbol, TimeFrameWeek, 0);
+
+   string name = "Rect_Week_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
+   DrawRect(name, start, end, top, bottom, RectColorWeek);
+
+   CheckUntouchedDailyMidsInWeek(start, end, open, close);
+
+   lastWeekTime = timePrev;
+}
+
+//+------------------------------------------------------------------+
+//| Check and draw untouched daily midlines in week                   |
+//+------------------------------------------------------------------+
+void CheckUntouchedDailyMidsInWeek(datetime weekStart, datetime weekEnd, double weekOpen, double weekClose)
+{
+   int totalBars = Bars(_Symbol, TimeFrameDay);
+   if(totalBars < 5)
+      return;
+
+   // Clear existing midlines for this week
+   string prefix = "MidLine_";
+   int obj_total = ObjectsTotal(0, 0, -1);
+   for(int i = obj_total - 1; i >= 0; i--)
+   {
+      string obj_name = ObjectName(0, i, 0, -1);
+      if(StringFind(obj_name, prefix) == 0)
+      {
+         datetime obj_time = (datetime)ObjectGetInteger(0, obj_name, OBJPROP_TIME, 0);
+         if(obj_time >= weekStart && obj_time < weekEnd)
+            ObjectDelete(0, obj_name);
+      }
+   }
+
+   // Collect valid weekday bars
+   int dayIndices[];
+   ArrayResize(dayIndices, totalBars);
+   int found = 0;
+
+   for(int i = 0; i < totalBars; i++)
+   {
+      datetime t = iTime(_Symbol, TimeFrameDay, i);
+      if(t >= weekStart && t < weekEnd)
+      {
+         MqlDateTime mt;
+         TimeToStruct(t, mt);
+         if(mt.day_of_week >= 1 && mt.day_of_week <= 5) // Monday to Friday
+         {
+            dayIndices[found] = i;
+            found++;
+         }
+      }
+   }
+   ArrayResize(dayIndices, found);
+
+   if(found < 1)
+      return;
+
+   // Define weekly body boundaries
+   double weekTop = MathMax(weekOpen, weekClose);
+   double weekBottom = MathMin(weekOpen, weekClose);
+
+   // Process each day's midline
+   for(int i = found - 1; i >= 0; i--) // Start from oldest to newest
+   {
+      int idxRef = dayIndices[i];
+      datetime timeRef = iTime(_Symbol, TimeFrameDay, idxRef);
+      double highRef = iHigh(_Symbol, TimeFrameDay, idxRef);
+      double lowRef = iLow(_Symbol, TimeFrameDay, idxRef);
+      double mid = (highRef + lowRef) / 2.0;
+
+      // Check if midline is outside weekly candle body
+      bool isOutsideWeeklyBody = UseOutsideWeeklyBody ? (mid < weekBottom || mid > weekTop) : true;
+
+      if(!isOutsideWeeklyBody)
+         continue; // Skip if midline is inside weekly body and rule is enabled
+
+      bool touched = false;
+      // Check if midline was touched by subsequent days
+      for(int j = i - 1; j >= 0; j--) // Check newer days only
+      {
+         int idxTest = dayIndices[j];
+         datetime timeTest = iTime(_Symbol, TimeFrameDay, idxTest);
+         if(timeTest <= timeRef)
+            continue; // Skip same or older days
+
+         double highTest = iHigh(_Symbol, TimeFrameDay, idxTest);
+         double lowTest = iLow(_Symbol, TimeFrameDay, idxTest);
+
+         // Precise touch detection with small tolerance to account for floating-point
+         double tolerance = _Point * 0.5;
+         if(lowTest - tolerance <= mid && mid <= highTest + tolerance)
+         {
+            touched = true;
+            PrintFormat("MidLine of day %s touched by day %s: Mid=%.5f, Low=%.5f, High=%.5f",
+                       TimeToString(timeRef, TIME_DATE), TimeToString(timeTest, TIME_DATE),
+                       mid, lowTest, highTest);
+            break;
+         }
+      }
+
+      if(!touched)
+      {
+         string name = prefix + TimeToString(timeRef, TIME_DATE);
+         datetime timeStart = timeRef;
+         datetime timeEnd = weekEnd; // Extend to end of week
+
+         if(ObjectFind(0, name) < 0)
+         {
+            if(ObjectCreate(0, name, OBJ_TREND, 0, timeStart, mid, timeEnd, mid))
+            {
+               ObjectSetInteger(0, name, OBJPROP_COLOR, MidLineColor);
+               ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
+               ObjectSetInteger(0, name, OBJPROP_WIDTH, 2);
+               ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+               PrintFormat("MidLine created for day %s at price %.5f",
+                          TimeToString(timeRef, TIME_DATE), mid);
+            }
+            else
+            {
+               PrintFormat("Error creating MidLine for day %s: %d",
+                          TimeToString(timeRef, TIME_DATE), GetLastError());
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Draw short line based on first H1 close of the day               |
+//+------------------------------------------------------------------+
+void DrawFirstH1CloseLine()
+{
+   datetime current_time = TimeCurrent();
+   datetime gmt_now = TimeGMT();
+   datetime gmt_midnight = (datetime)((ulong)(gmt_now / 86400) * 86400);
+   datetime day_start = gmt_midnight;
+   datetime day_end = day_start + 86400;
+
+   // Check if first H1 candle has closed
+   int h1_index = iBarShift(_Symbol, PERIOD_H1, day_start, true);
+   if(h1_index < 0)
+      return;
+
+   datetime h1_time = iTime(_Symbol, PERIOD_H1, h1_index);
+   if(h1_time == lastH1Time)
+      return;
+
+   // Get first H1 close
+   double first_h1_close = iClose(_Symbol, PERIOD_H1, h1_index);
+
+   // Get previous week's candle body
+   int prev_week_index = iBarShift(_Symbol, TimeFrameWeek, day_start - 7 * 86400);
+   double prev_week_open = 0;
+   double prev_week_close = 0;
+   if(prev_week_index >= 0)
+   {
+      prev_week_open = iOpen(_Symbol, TimeFrameWeek, prev_week_index);
+      prev_week_close = iClose(_Symbol, TimeFrameWeek, prev_week_index);
+   }
+   double prev_week_top = MathMax(prev_week_open, prev_week_close);
+   double prev_week_bottom = MathMin(prev_week_open, prev_week_close);
+
+   // Get previous day's range
+   datetime prev_day_start = day_start - 86400;
+   int prev_day_index = iBarShift(_Symbol, PERIOD_D1, prev_day_start);
+   if(prev_day_index < 0)
+      return;
+
+   double prev_day_high = iHigh(_Symbol, PERIOD_D1, prev_day_index);
+   double prev_day_low = iLow(_Symbol, PERIOD_D1, prev_day_index);
+   double prev_day_range = prev_day_high - prev_day_low;
+
+   string date_str = TimeToString(day_start, TIME_DATE);
+   string close_line_name = UniquePrefix + "CloseLine_" + date_str;
+
+   double tolerance = 0.0001;
+   double threshold_up = prev_day_high - (prev_day_range * 0.49);
+   double threshold_down = prev_day_low + (prev_day_range * 0.49);
+
+   color close_line_color = clrWhite;
+   bool draw = false;
+
+   // Check if first H1 close is outside previous week's candle body
+   bool isOutsidePrevWeekBody = UseOutsideWeeklyBody ? (first_h1_close < prev_week_bottom || first_h1_close > prev_week_top) : true;
+
+   if(isOutsidePrevWeekBody)
+   {
+      if(first_h1_close >= threshold_up - tolerance || first_h1_close > prev_day_high)
+      {
+         close_line_color = Above50Color;
+         draw = true;
+      }
+      else if(first_h1_close <= threshold_down + tolerance || first_h1_close < prev_day_low)
+      {
+         close_line_color = Below50Color;
+         draw = true;
+      }
+   }
+
+   if(draw)
+   {
+      if(ObjectFind(0, close_line_name) < 0)
+      {
+         datetime close_line_end = day_start + 7200; // 2-hour line
+         ObjectCreate(0, close_line_name, OBJ_TREND, 0, day_start, first_h1_close, close_line_end, first_h1_close);
+         ObjectSetInteger(0, close_line_name, OBJPROP_COLOR, close_line_color);
+         ObjectSetInteger(0, close_line_name, OBJPROP_WIDTH, 2);
+         ObjectSetInteger(0, close_line_name, OBJPROP_STYLE, STYLE_SOLID);
+         ObjectSetInteger(0, close_line_name, OBJPROP_RAY, false);
+         ObjectSetInteger(0, close_line_name, OBJPROP_SELECTABLE, false);
+      }
+      else
+      {
+         ObjectSetInteger(0, close_line_name, OBJPROP_COLOR, close_line_color);
+         ObjectMove(0, close_line_name, 0, day_start, first_h1_close);
+         ObjectMove(0, close_line_name, 1, day_start + 7200, first_h1_close);
+      }
+   }
+   else
+   {
+      if(ObjectFind(0, close_line_name) >= 0)
+         ObjectDelete(0, close_line_name);
+   }
+
+   // Update GMT label
+   string label_name = UniquePrefix + "GMT_Time";
+   string gmt_time_str = TimeToString(TimeGMT(), TIME_MINUTES);
+   if(ObjectFind(0, label_name) < 0)
+   {
+      ObjectCreate(0, label_name, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, label_name, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
+      ObjectSetInteger(0, label_name, OBJPROP_XDISTANCE, 90);
+      ObjectSetInteger(0, label_name, OBJPROP_YDISTANCE, 10);
+      ObjectSetInteger(0, label_name, OBJPROP_FONTSIZE, 10);
+      ObjectSetInteger(0, label_name, OBJPROP_COLOR, clrWhite);
+      ObjectSetString(0, label_name, OBJPROP_TEXT, "GMT " + gmt_time_str);
+   }
+   else
+   {
+      ObjectSetString(0, label_name, OBJPROP_TEXT, "GMT " + gmt_time_str);
+   }
+
+   lastH1Time = h1_time;
+}
+
+//+------------------------------------------------------------------+
+//| Draw rectangle                                                   |
+//+------------------------------------------------------------------+
+void DrawRect(string name, datetime time1, datetime time2, double price1, double price2, color rectColor)
+{
+   if(ObjectFind(0, name) >= 0)
+      return;
+
+   if(ObjectCreate(0, name, OBJ_RECTANGLE, 0, time1, price1, time2, price2))
+   {
+      ObjectSetInteger(0, name, OBJPROP_COLOR, rectColor);
+      ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+      ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, false);
+   }
+   else
+   {
+      PrintFormat("Error creating rectangle %s: %d", name, GetLastError());
+   }
+}
+//+------------------------------------------------------------------+
