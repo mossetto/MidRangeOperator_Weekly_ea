@@ -43,9 +43,7 @@ void OnDeinit(const int reason)
 {
 
    EventKillTimer();
-   //ObjectsDeleteAll(0, "Rect_");
-   //ObjectsDeleteAll(0, "MidLine_");
-   //ObjectsDeleteAll(0, UniquePrefix + "CloseLine_");
+   ObjectsDeleteAll(0, -1);
 }
 
 //+------------------------------------------------------------------+
@@ -94,25 +92,26 @@ void DrawWeeklyRectangle()
    if(weekBars < 3)
       return;
 
-   for(int i = 1; i <= 1; i++) // Solo la semana pasada
-   {
-      datetime timePrev = iTime(_Symbol, TimeFrameWeek, i);
-      if(timePrev == lastWeekTime)
-         continue;
+   datetime timePrev = iTime(_Symbol, TimeFrameWeek, 1);
 
-      double open = iOpen(_Symbol, TimeFrameWeek, i);
-      double close = iClose(_Symbol, TimeFrameWeek, i);
-      double top = MathMax(open, close);
-      double bottom = MathMin(open, close);
-      datetime start = iTime(_Symbol, TimeFrameWeek, i);
-      datetime end = iTime(_Symbol, TimeFrameWeek, i - 1);
+   // Forzar dibujo si el objeto no existe
+   string name = "Rect_Week_" + TimeToString(timePrev, TIME_DATE|TIME_MINUTES);
+   if(ObjectFind(0, name) != -1 && timePrev == lastWeekTime)
+      return;
 
-      string name = "Rect_Week_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
-      DrawRect(name, start, end, top, bottom, RectColorWeek);
+   double open = iOpen(_Symbol, TimeFrameWeek, 1);
+   double close = iClose(_Symbol, TimeFrameWeek, 1);
+   double top = MathMax(open, close);
+   double bottom = MathMin(open, close);
+   datetime start = iTime(_Symbol, TimeFrameWeek, 1);
+   datetime end = iTime(_Symbol, TimeFrameWeek, 0);
 
-      CheckUntouchedDailyMidsInWeek(start, end, open, close);
-      lastWeekTime = timePrev;
-   }
+   DrawRect(name, start, end, top, bottom, RectColorWeek);
+
+   CheckUntouchedDailyMidsInWeek(start, end, open, close);
+   lastWeekTime = timePrev;
+   ChartSetInteger(0, CHART_SHIFT, true);
+   ChartNavigate(0, CHART_END);
 }
 
 
