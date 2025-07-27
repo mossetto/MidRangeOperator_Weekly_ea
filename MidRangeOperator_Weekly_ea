@@ -5,8 +5,8 @@
 //+------------------------------------------------------------------+
 #include <ChartObjects\ChartObjectsShapes.mqh>
 
- color RectColorDay = clrDarkSlateGray;      // Color for daily rectangles
- color RectColorWeek = clrSlateBlue;         // Color for weekly rectangles
+ color RectColorDay = clrLightSeaGreen;      // Color for daily rectangles
+ color RectColorWeek = clrBlack;         // Color for weekly rectangles
  color MidLineColor = clrGold;               // Color for midline
  color Above50Color = clrSpringGreen;        // Color for above 50% lines
  color Below50Color = clrTomato;             // Color for below 50% lines
@@ -25,11 +25,14 @@ string UniquePrefix = "MyIndicator_";
 int OnInit()
 {
 ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrDarkGreen);
-   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrDarkGreen);
-   ChartSetInteger(0, CHART_COLOR_CHART_UP, clrDarkGreen);
-   ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrDarkGreen);
-   ChartSetInteger(0, CHART_SHOW_GRID, false);
+   //ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrDarkGreen);
+   //ChartSetInteger(0, CHART_COLOR_CHART_UP, clrDarkGreen);
+   //ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrDarkGreen);
+   //ChartSetInteger(0, CHART_SHOW_GRID, false);
    EventSetTimer(60);
+   DrawDailyRectangle();
+   DrawWeeklyRectangle();
+   DrawFirstH1CloseLine();
    return INIT_SUCCEEDED;
 }
 
@@ -61,23 +64,26 @@ void OnTimer()
 void DrawDailyRectangle()
 {
    int dayBars = Bars(_Symbol, TimeFrameDay);
-   if(dayBars < 2)
+   if(dayBars < 10)
       return;
 
-   datetime timePrev = iTime(_Symbol, TimeFrameDay, 1);
-   if(timePrev == lastDayTime)
-      return;
+   for(int i = 5; i >= 1; i--) // Últimos 5 días previos (lunes a viernes pasados)
+   {
+      datetime time = iTime(_Symbol, TimeFrameDay, i);
+      if(time == 0) continue;
 
-   double high = iHigh(_Symbol, TimeFrameDay, 1);
-   double low = iLow(_Symbol, TimeFrameDay, 1);
-   datetime start = iTime(_Symbol, TimeFrameDay, 1);
-   datetime end = iTime(_Symbol, TimeFrameDay, 0);
+      double high = iHigh(_Symbol, TimeFrameDay, i);
+      double low = iLow(_Symbol, TimeFrameDay, i);
+      datetime start = iTime(_Symbol, TimeFrameDay, i);
+      datetime end = iTime(_Symbol, TimeFrameDay, i - 1);
 
-   string name = "Rect_Day_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
-   DrawRect(name, start, end, high, low, RectColorDay);
+      string name = "Rect_Day_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
+      DrawRect(name, start, end, high, low, RectColorDay);
+   }
 
-   lastDayTime = timePrev;
+   lastDayTime = iTime(_Symbol, TimeFrameDay, 1);
 }
+
 
 //+------------------------------------------------------------------+
 //| Draw weekly rectangle and check midlines                         |
@@ -85,27 +91,30 @@ void DrawDailyRectangle()
 void DrawWeeklyRectangle()
 {
    int weekBars = Bars(_Symbol, TimeFrameWeek);
-   if(weekBars < 2)
+   if(weekBars < 3)
       return;
 
-   datetime timePrev = iTime(_Symbol, TimeFrameWeek, 1);
-   if(timePrev == lastWeekTime)
-      return;
+   for(int i = 1; i <= 1; i++) // Solo la semana pasada
+   {
+      datetime timePrev = iTime(_Symbol, TimeFrameWeek, i);
+      if(timePrev == lastWeekTime)
+         continue;
 
-   double open = iOpen(_Symbol, TimeFrameWeek, 1);
-   double close = iClose(_Symbol, TimeFrameWeek, 1);
-   double top = MathMax(open, close);
-   double bottom = MathMin(open, close);
-   datetime start = iTime(_Symbol, TimeFrameWeek, 1);
-   datetime end = iTime(_Symbol, TimeFrameWeek, 0);
+      double open = iOpen(_Symbol, TimeFrameWeek, i);
+      double close = iClose(_Symbol, TimeFrameWeek, i);
+      double top = MathMax(open, close);
+      double bottom = MathMin(open, close);
+      datetime start = iTime(_Symbol, TimeFrameWeek, i);
+      datetime end = iTime(_Symbol, TimeFrameWeek, i - 1);
 
-   string name = "Rect_Week_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
-   DrawRect(name, start, end, top, bottom, RectColorWeek);
+      string name = "Rect_Week_" + TimeToString(start, TIME_DATE|TIME_MINUTES);
+      DrawRect(name, start, end, top, bottom, RectColorWeek);
 
-   CheckUntouchedDailyMidsInWeek(start, end, open, close);
-
-   lastWeekTime = timePrev;
+      CheckUntouchedDailyMidsInWeek(start, end, open, close);
+      lastWeekTime = timePrev;
+   }
 }
+
 
 //+------------------------------------------------------------------+
 //| Check and draw untouched daily midlines in week                   |
